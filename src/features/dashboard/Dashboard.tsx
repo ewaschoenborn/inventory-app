@@ -142,7 +142,11 @@ const Dashboard = () => {
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
             a.href = url;
-            a.download = 'inventory.xlsx';
+            
+            // Generate filename with date and time suffix
+            const now = new Date();
+            const dateStr = now.toISOString().slice(0, 19).replace(/:/g, '-').replace('T', '_');
+            a.download = `inventory_${dateStr}.xlsx`;
 
             a.click();
             URL.revokeObjectURL(url);

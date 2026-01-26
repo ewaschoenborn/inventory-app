@@ -1,11 +1,10 @@
 import { Box, FileText, Layers, MapPin, Pen, ChevronLeft } from 'lucide-react';
 import styled from 'styled-components';
-import { useState, useRef, useEffect, useCallback } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { db } from '../../db/db';
 import type { IItem } from '../../db/items';
 import StatusBadge from '../../utils/StatusBadge';
-import { inventoryApi } from '../../app/api';
 import IconContainer from '../../utils/IconContainer';
 import { theme } from '../../styles/theme';
 import {
@@ -38,10 +37,6 @@ function addMonths(date: Date, months: number): Date {
 const ItemDetails = () => {
     const { id } = useParams<{ id: string }>();
     const [item, setItem] = useState<IItem | null>(null);
-    const [text, setText] = useState('');
-    const textareaRef = useRef<HTMLTextAreaElement>(null);
-    const [isSaving, setIsSaving] = useState(false);
-    const debounceTimerRef = useRef<NodeJS.Timeout | null>(null);
     const navigate = useNavigate();
 
     const saveRemark = useCallback(
@@ -70,44 +65,10 @@ const ItemDetails = () => {
             const dbItem = await db.items.get(itemId);
             if (dbItem) {
                 setItem(dbItem);
-                setText(dbItem.remark || '');
             }
         };
         fetchItem();
     }, [id]);
-
-    const handleTextChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-        const newText = e.target.value;
-        setText(newText);
-
-        if (debounceTimerRef.current) {
-            clearTimeout(debounceTimerRef.current);
-        }
-
-        debounceTimerRef.current = setTimeout(() => {
-            saveRemark(newText);
-        }, 3000);
-    };
-
-    // Auto-grow textarea
-    const adjustTextareaHeight = () => {
-        if (textareaRef.current) {
-            textareaRef.current.style.height = 'auto';
-            textareaRef.current.style.height = textareaRef.current.scrollHeight + 'px';
-        }
-    };
-
-    useEffect(() => {
-        adjustTextareaHeight();
-    }, [text]);
-
-    useEffect(() => {
-        return () => {
-            if (debounceTimerRef.current) {
-                clearTimeout(debounceTimerRef.current);
-            }
-        };
-    }, []);
 
     const handleAdditionalDocs = () => {
         alert('Additional Docs clicked!');
@@ -121,17 +82,23 @@ const ItemDetails = () => {
     return (
         <StyledContainer>
             <StyledHeader>
-                <StyledBackButton onClick={() => navigate(-1)}>
-                    <ChevronLeft size={20} />
-                </StyledBackButton>
-                <Title>
-                    {item.isSet ? (
-                        <Layers size={20} color={theme.colors.text.muted} />
-                    ) : (
-                        <Box size={20} color={theme.colors.text.muted} />
-                    )}
-                    {item.name}
-                </Title>
+                <HeaderContent>
+                    <StyledBackButton onClick={() => navigate(-1)}>
+                        <ChevronLeft size={20} />
+                    </StyledBackButton>
+                    <Title>
+                        {item.isSet ? (
+                            <Layers size={20} color={theme.colors.text.muted} />
+                        ) : (
+                            <Box size={20} color={theme.colors.text.muted} />
+                        )}
+                        {item.name}
+                    </Title>
+                    <HeaderEditButton variant="primary" onClick={() => navigate(`/items/${item.id}/modify`)}>
+                        <IconContainer icon={Pen} />
+                        <span>Bearbeiten</span>
+                    </HeaderEditButton>
+                </HeaderContent>
             </StyledHeader>
 
             <StyledContentWrapper>
@@ -203,17 +170,8 @@ const ItemDetails = () => {
                 </StyledDetailsCard>
 
                 <StyledDetailsCard>
-                    <InfoLabel style={{ marginBottom: theme.spacing.md }}>
-                        Kommentare{' '}
-                        {isSaving && (
-                            <span
-                                style={{ color: theme.colors.text.secondary, fontSize: theme.typography.fontSize.xs }}
-                            >
-                                Wird gespeichert...
-                            </span>
-                        )}
-                    </InfoLabel>
-                    <StyledTextarea ref={textareaRef} value={text} onChange={handleTextChange} />
+                    <InfoLabel style={{ marginBottom: theme.spacing.md }}>Kommentare</InfoLabel>
+                    <StyledTextarea value={item.remark || ''} disabled readOnly />
                 </StyledDetailsCard>
 
                 <ButtonContainer>
@@ -245,12 +203,51 @@ const StyledContainer = styled(Container)`
 `;
 
 const StyledHeader = styled(Header)`
-    padding: ${theme.spacing.md} ${theme.spacing.lg} ${theme.spacing.md} 0;
+    padding: ${theme.spacing.md} 0;
     margin-bottom: 0;
     margin-left: 0;
+    position: relative;
+`;
+
+const HeaderContent = styled.div`
     display: flex;
     align-items: center;
     gap: ${theme.spacing.md};
+    width: 100%;
+    max-width: 1000px;
+    margin: 0 auto;
+    padding: 0 ${theme.spacing.lg};
+
+    @media only screen and (max-device-width: 812px) and (orientation: portrait) {
+        padding: 0 ${theme.spacing.md};
+    }
+`;
+
+const HeaderEditButton = styled(Button)`
+    display: flex;
+    align-items: center;
+    gap: ${theme.spacing.xs};
+    margin-left: auto;
+    height: 36px;
+    padding: 0 ${theme.spacing.md};
+    font-size: ${theme.typography.fontSize.sm};
+    box-shadow: ${theme.shadows.sm};
+
+    &:hover {
+        box-shadow: ${theme.shadows.md};
+        transform: translateY(-1px);
+    }
+
+    &:active {
+        transform: translateY(0);
+    }
+
+    @media only screen and (max-device-width: 812px) and (orientation: portrait) {
+        padding: 0 ${theme.spacing.sm};
+        span {
+            display: none;
+        }
+    }
 `;
 
 const StyledBackButton = styled(BackButton)`
@@ -269,7 +266,11 @@ const Title = styled.h1`
 `;
 
 const StyledContentWrapper = styled(ContentWrapper)`
-    padding: 0;
+    padding: 0 ${theme.spacing.lg};
+
+    @media only screen and (max-device-width: 812px) and (orientation: portrait) {
+        padding: 0 ${theme.spacing.md};
+    }
 `;
 
 const Subtitle = styled.div`

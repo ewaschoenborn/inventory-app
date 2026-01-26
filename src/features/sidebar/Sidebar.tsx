@@ -203,6 +203,11 @@ const Sidebar = () => {
     const [open, setOpen] = useState(false);
     const location = useLocation();
 
+    const isActive = (path: string) => {
+        if (path === '/') return location.pathname === '/';
+        return location.pathname === path || location.pathname.startsWith(`${path}/`);
+    };
+
     return (
         <>
             <SidebarWrapper $open={open}>
@@ -214,7 +219,7 @@ const Sidebar = () => {
                             key={link.path}
                             to={link.path}
                             $sidebarOpen={open}
-                            $active={location.pathname === link.path}
+                            $active={isActive(link.path)}
                             onClick={() => setOpen(false)}
                         >
                             <IconContainer icon={link.icon} />

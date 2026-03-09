@@ -1,0 +1,1067 @@
+import { useEffect, useState, type ReactNode } from 'react';
+import { useNavigate } from 'react-router-dom';
+import styled from 'styled-components';
+import { Info, ArrowDownAZ, ArrowDownZA, Box, Boxes, ChevronLeft, ChevronRight, Hourglass, MapPin } from 'lucide-react';
+import type { DamageLevelType, IItem } from '../../db/items';
+import { ItemFilter } from './ItemFilterPanel';
+import { inventoryApi, type SortDirection, type SortField } from '../../app/api';
+import StatusBadge, { DamageLevelStyles } from '../../utils/StatusBadge';
+import IconContainer from '../../utils/IconContainer';
+import { Button, OverlayTrigger, Tooltip } from 'react-bootstrap';
+import React from 'react';
+import { parseLocationStringRaw, mapLocationKey } from '../../utils/locationString';
+import { useDispatch, useSelector } from 'react-redux';
+import type { RootState } from '../../store/store';
+import { setSortDirection, setSortField } from '../../store/slices/searchSlice';
+import { db } from '../../db/db';
+import type { IPackingPlan, IPackingPlanItem } from '../../db/packingPlans';
+import { EmergencyScenarioType } from '../../db/packingPlans';
+
+import { usePackMode } from './usePackMode';
+import QuantitySpinner from '../../components/QuantitySpinner';
+import { calculateNextInspectionDate } from '../../utils/date';
+import { theme } from '../../styles/theme';
+
+import { useLocation } from 'react-router-dom';
+
+const ItemOverview = () => {
+    const navigate = useNavigate();
+    const dispatch = useDispatch();
+
+    const location = useLocation();
+    const navState = location.state as any;
+
+    // Pack mode adds multi-select + quantity controls for creating packing plans.
+    const packModeState = usePackMode(Boolean(navState?.packMode || navState?.planId));
+
+    const { packMode, selectedItemIds, toggleItem, qtyByItemId, setQuantity, planName } = packModeState;
+    const searchState = useSelector((state: RootState) => state.search);
+    const { query: searchTerm, sortField, sortDirection, filters } = searchState;
+
+    const [items, setItems] = useState<IItem[]>([]);
+
+    // Pagination state
+    const [currentPage, setCurrentPage] = useState<number>(1);
+    const [pageSize] = useState<number>(50); // Items per page
+    const [totalItems, setTotalItems] = useState<number>(0);
+    const [totalPages, setTotalPages] = useState<number>(0);
+    const [isLoading, setIsLoading] = useState<boolean>(false);
+
+    useEffect(() => {
+        if (navState?.preselectedItems && selectedItemIds.size === 0) {
+            navState.preselectedItems.forEach((item: any) => {
+                toggleItem(item.itemId.toString(), item.quantity ?? 1);
+            });
+        }
+
+        if (navState?.planName && packModeState.setPlanName) {
+            packModeState.setPlanName(navState.planName);
+        }
+    }, []);
+
+    // Separate effect for fetching items so pagination doesn't reset selections
+    useEffect(() => {
+        const fetchItems = async () => {
+            setIsLoading(true);
+            try {
+                const result = await inventoryApi.fetchItemsPaginatedWithFilter(
+                    { page: currentPage, pageSize },
+                    searchTerm || '',
+                    filters || {}
+                );
+                setItems(result.data);
+                setTotalItems(result.pagination.totalItems);
+                setTotalPages(result.pagination.totalPages);
+            } catch (error) {
+                console.error('Error fetching items:', error);
+            } finally {
+                setIsLoading(false);
+            }
+        };
+
+        fetchItems();
+    }, [currentPage, searchTerm, filters]);
+
+    // Fetch items with pagination + search/filter state from Redux.
+    useEffect(() => {
+        const fetchItems = async () => {
+            setIsLoading(true);
+            try {
+                console.log('filters', filters);
+                const result = await inventoryApi.fetchItemsPaginatedWithFilter(
+                    { page: currentPage, pageSize },
+                    searchTerm || '',
+                    filters || {}
+                );
+                setItems(result.data);
+                setTotalItems(result.pagination.totalItems);
+                setTotalPages(result.pagination.totalPages);
+            } catch (error) {
+                console.error('Error fetching items:', error);
+            } finally {
+                setIsLoading(false);
+            }
+        };
+
+        fetchItems();
+    }, [currentPage, pageSize, searchTerm, filters]);
+
+    // Reset to page 1 when search term or filters change.
+    useEffect(() => {
+        setCurrentPage(1);
+    }, [searchTerm, filters]);
+
+    const handleSort = (field: SortField) => {
+        // Cycle: asc -> desc -> off for the current sort field.
+        if (sortField === field) {
+            if (field === 'nextInspection') {
+                dispatch(setSortField(null));
+                dispatch(setSortDirection('asc'));
+            } else if (sortDirection === 'asc') {
+                dispatch(setSortDirection('desc'));
+            } else {
+                dispatch(setSortField(null));
+                dispatch(setSortDirection('asc'));
+            }
+        } else {
+            dispatch(setSortField(field));
+            dispatch(setSortDirection('asc'));
+        }
+    };
+
+    const getSortedItems = (itemsToSort: IItem[]) => {
+        if (!sortField) return itemsToSort;
+
+        // Local sort for the current page based on active column + direction.
+        const sorted = [...itemsToSort];
+        sorted.sort((a, b) => {
+            let aValue: any;
+            let bValue: any;
+
+            switch (sortField) {
+                case 'itemId':
+                    aValue = a.id;
+                    bValue = b.id;
+                    break;
+                case 'name':
+                    aValue = a.name;
+                    bValue = b.name;
+                    break;
+                case 'type':
+                    aValue = a.isSet ? 'Satz' : 'Teil';
+                    bValue = b.isSet ? 'Satz' : 'Teil';
+                    break;
+                case 'amountActual':
+                    aValue = a.amountActual ?? 0;
+                    bValue = b.amountActual ?? 0;
+                    break;
+                case 'availability':
+                    aValue = a.availability;
+                    bValue = b.availability;
+                    break;
+                case 'damageLevel':
+                    aValue = a.damageLevel;
+                    bValue = b.damageLevel;
+                    break;
+                case 'location':
+                    aValue = a.location;
+                    bValue = b.location;
+                    break;
+                case 'inventoryNumber':
+                    aValue = a.inventoryNumber ?? '';
+                    bValue = b.inventoryNumber ?? '';
+                    break;
+                case 'deviceNumber':
+                    aValue = a.deviceNumber ?? '';
+                    bValue = b.deviceNumber ?? '';
+                    break;
+                case 'nextInspection': {
+                    const aDate = calculateNextInspectionDate(a.lastInspection, a.inspectionIntervalMonths);
+                    const bDate = calculateNextInspectionDate(b.lastInspection, b.inspectionIntervalMonths);
+                    aValue = aDate ? aDate.getTime() : sortDirection === 'asc' ? Infinity : -Infinity;
+                    bValue = bDate ? bDate.getTime() : sortDirection === 'asc' ? Infinity : -Infinity;
+                    break;
+                }
+                default:
+                    return 0;
+            }
+
+            if (typeof aValue === 'string' && typeof bValue === 'string') {
+                const comparison = aValue.localeCompare(bValue);
+                return sortDirection === 'asc' ? comparison : -comparison;
+            } else {
+                const comparison = aValue < bValue ? -1 : aValue > bValue ? 1 : 0;
+                return sortDirection === 'asc' ? comparison : -comparison;
+            }
+        });
+
+        return sorted;
+    };
+
+    const sortedItems = getSortedItems(items);
+
+    const createId = (prefix = 'id'): string => {
+        // `crypto.randomUUID()` is not always available (e.g. http:// on LAN IPs).
+        // Use it when present, otherwise fall back to a reasonably-unique string.
+        const c = globalThis.crypto as Crypto | undefined;
+        if (c && 'randomUUID' in c && typeof (c as any).randomUUID === 'function') {
+            return (c as any).randomUUID();
+        }
+        return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+    };
+
+    const getEffectiveAvailability = (item: IItem): number => {
+        // Older DB rows / imports may not have `availability` populated.
+        // In that case we fall back to `amountActual` to avoid "everything disabled" in pack mode.
+        const availability = Number(item.availability);
+        if (Number.isFinite(availability)) return availability;
+
+        const amountActual = Number(item.amountActual);
+        if (Number.isFinite(amountActual)) return amountActual;
+
+        return 0;
+    };
+
+    const handlePageChange = (newPage: number) => {
+        if (newPage >= 1 && newPage <= totalPages) {
+            setCurrentPage(newPage);
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+        }
+    };
+
+    const handleSavePackingPlan = async () => {
+        if (selectedItemIds.size === 0) {
+            alert('Please select at least one item to pack.');
+            return;
+        }
+
+        const existingPlanId = navState?.planId;
+
+        // If adding to an existing plan, skip name validation
+        if (!existingPlanId && !planName.trim()) {
+            alert('Please enter a plan name.');
+            return;
+        }
+
+        try {
+            const now = new Date().toISOString();
+            let targetPlanId: string;
+
+            if (existingPlanId) {
+                targetPlanId = existingPlanId;
+
+                await db.packingPlans.update(existingPlanId, { updatedAt: now });
+            } else {
+                // Creating a new plan
+                const packingPlan: IPackingPlan = {
+                    id: createId('plan'),
+                    name: planName.trim(),
+                    scenarioType: EmergencyScenarioType.CUSTOM,
+                    description: '',
+                    createdAt: now,
+                    updatedAt: now,
+                };
+                await db.packingPlans.add(packingPlan);
+                targetPlanId = packingPlan.id;
+            }
+
+            // Get existing items in the plan to avoid duplicates / merge quantities
+            const existingItems = await db.packingPlanItems.where('packingPlanId').equals(targetPlanId).toArray();
+
+            const existingByItemId = new Map(existingItems.map((i) => [i.Iid.toString(), i]));
+
+            const newItems: IPackingPlanItem[] = [];
+
+            Array.from(selectedItemIds).forEach((itemId, index) => {
+                const qty = qtyByItemId[itemId] ?? 1;
+                const existing = existingByItemId.get(itemId);
+
+                if (existing) {
+                    // Update quantity of already-present item
+                    db.packingPlanItems.update(existing.id, {
+                        requiredQuantity: existing.requiredQuantity + qty,
+                    });
+                } else {
+                    newItems.push({
+                        id: createId('planItem'),
+                        packingPlanId: targetPlanId,
+                        Iid: Number(itemId),
+                        requiredQuantity: qty,
+                        notes: '',
+                        order: existingItems.length + index,
+                    });
+                }
+            });
+
+            if (newItems.length > 0) {
+                await db.packingPlanItems.bulkAdd(newItems);
+            }
+
+            packModeState.togglePackMode();
+            navigate(`/packing-plans/${targetPlanId}`);
+        } catch (error) {
+            console.error('Error saving packing plan:', error);
+            alert('Failed to save packing plan. Please try again.');
+        }
+    };
+
+    return (
+        <div>
+            <ItemFilter packModeState={packModeState} onSavePackingPlan={handleSavePackingPlan} />
+
+            {isLoading ? (
+                <LoadingContainer>
+                    <IconContainer icon={Hourglass} />
+                    <span>Lade Inventar...</span>
+                </LoadingContainer>
+            ) : (
+                <>
+                    <Table $showNextInspection={sortField === 'nextInspection'}>
+                        <TableHeader>
+                            <HeaderCell onClick={() => handleSort('inventoryNumber')}>
+                                <HeaderContent>
+                                    <span>Inventar-Nr.</span>
+                                    <SortIndicator
+                                        active={sortField === 'inventoryNumber'}
+                                        sortDirection={sortDirection}
+                                    />
+                                </HeaderContent>
+                            </HeaderCell>
+                            <HeaderCell onClick={() => handleSort('name')}>
+                                <HeaderContent>
+                                    <span>Name</span>
+                                    <SortIndicator active={sortField === 'name'} sortDirection={sortDirection} />
+                                </HeaderContent>
+                            </HeaderCell>
+                            <HeaderCell onClick={() => handleSort('type')}>
+                                <HeaderContent>
+                                    <span>Typ</span>
+                                    <SortIndicator active={sortField === 'type'} sortDirection={sortDirection} />
+                                </HeaderContent>
+                            </HeaderCell>
+                            <HeaderCell onClick={() => handleSort('amountActual')}>
+                                <HeaderContent>
+                                    <span>Menge</span>
+                                    <SortIndicator
+                                        active={sortField === 'amountActual'}
+                                        sortDirection={sortDirection}
+                                    />
+                                </HeaderContent>
+                            </HeaderCell>
+                            <HeaderCell onClick={() => handleSort('damageLevel')}>
+                                <HeaderContent>
+                                    <span>Zustand</span>
+                                    <SortIndicator active={sortField === 'damageLevel'} sortDirection={sortDirection} />
+                                </HeaderContent>
+                            </HeaderCell>
+                            <HeaderCell onClick={() => handleSort('location')}>
+                                <HeaderContent>
+                                    <span>Ort</span>
+                                    <InfoIndicator>
+                                        <p>
+                                            <b>Lagerkennung:</b>{' '}
+                                        </p>
+                                        <p>[Ebene]-[Containertyp*][Container-Nr.].[Subcontainer-Nr.]-[Werkzeug-Nr.]</p>
+                                        <p>(*R=Rollcontainer, G=EU-Box)</p>
+                                    </InfoIndicator>
+                                    <SortIndicator active={sortField === 'location'} sortDirection={sortDirection} />
+                                </HeaderContent>
+                            </HeaderCell>
+                            <HeaderCell onClick={() => handleSort('itemId')}>
+                                <HeaderContent>
+                                    <span>Sachnummer</span>
+                                    <SortIndicator active={sortField === 'itemId'} sortDirection={sortDirection} />
+                                </HeaderContent>
+                            </HeaderCell>
+                            <HeaderCell onClick={() => handleSort('deviceNumber')}>
+                                <HeaderContent>
+                                    <span>Geräte-Nr.</span>
+                                    <SortIndicator
+                                        active={sortField === 'deviceNumber'}
+                                        sortDirection={sortDirection}
+                                    />
+                                </HeaderContent>
+                            </HeaderCell>
+                            {sortField === 'nextInspection' && (
+                                <HeaderCell onClick={() => handleSort('nextInspection')}>
+                                    <HeaderContent>
+                                        <span>Nächste Inspektion</span>
+                                        <SortIndicator
+                                            active={sortField === 'nextInspection'}
+                                            sortDirection={sortDirection}
+                                        />
+                                    </HeaderContent>
+                                </HeaderCell>
+                            )}
+                        </TableHeader>
+                        {sortedItems.map((item) => {
+                            const damageLevel = DamageLevelStyles[item.damageLevel as DamageLevelType];
+                            const itemId = item.id.toString();
+                            const availability = getEffectiveAvailability(item);
+                            const hasExplicitAvailability = Number.isFinite(Number(item.availability));
+                            const isSelected = selectedItemIds.has(itemId);
+                            // In pack mode we treat "Verfügbar" as the upper bound (including 0).
+                            const maxQty = Number.isFinite(availability) ? Math.max(0, availability) : undefined;
+                            const minPackQty = maxQty === 0 ? 0 : 1;
+                            const defaultPackQty = maxQty ?? 1;
+                            const onRowClick = () => {
+                                if (packMode) {
+                                    // In pack mode, row click toggles selection.
+                                    toggleItem(itemId, defaultPackQty);
+                                } else {
+                                    navigate(`/items/${item.id}`);
+                                }
+                            };
+
+                            return (
+                                <TableRow
+                                    key={item.id}
+                                    onClick={onRowClick}
+                                    role="button"
+                                    $showNextInspection={sortField === 'nextInspection'}
+                                    tabIndex={0}
+                                    aria-pressed={packMode ? isSelected : undefined}
+                                    onKeyDown={(e) => {
+                                        if (e.key === 'Enter' || e.key === ' ') {
+                                            e.preventDefault();
+                                            onRowClick();
+                                        }
+                                    }}
+                                    $mobileBgColor={damageLevel.colorBg}
+                                    $mobileColor={damageLevel.color}
+                                    $mobileShadowColor={damageLevel.colorRGB}
+                                    className={isSelected ? 'selected' : ''} // ✅
+                                >
+                                    <TableCell id="inventoryNumber">{item.inventoryNumber ?? '-'}</TableCell>
+                                    <TableCell id="name">{item.name ?? '-'}</TableCell>
+                                    <TableCell id="isSet">
+                                        {item.isSet === true && <IconContainer icon={Boxes} />}
+                                        {item.isSet === false && <IconContainer icon={Box} />}
+                                    </TableCell>
+                                    <CellAmount id="amounts" $hideOnMobile>
+                                        <span>
+                                            <InfoInline infoComponent={<span>Verfügbare Menge</span>}>
+                                                {hasExplicitAvailability ? item.availability : availability}
+                                            </InfoInline>
+                                        </span>
+                                        <span>
+                                            <InfoInline infoComponent={<span>Tatsächliche Menge</span>}>
+                                                {item.amountActual ?? '-'}
+                                            </InfoInline>
+                                        </span>
+                                        <span>
+                                            <InfoInline infoComponent={<span>Zielmenge</span>}>
+                                                {item.amountTarget ?? '-'}
+                                            </InfoInline>
+                                        </span>
+                                    </CellAmount>
+                                    <TableCell id="damageLevel">
+                                        <StatusBadge damageLevelType={item.damageLevel} />
+                                    </TableCell>
+                                    <TableCell id="location">
+                                        {item.location && <IconContainer icon={MapPin} />}
+                                        {(() => {
+                                            try {
+                                                const components = parseLocationStringRaw(item.location);
+                                                return (
+                                                    <div style={{ display: 'flex', flexDirection: 'row', gap: '4px' }}>
+                                                        {Object.entries(components).map(([key, value]) => {
+                                                            return (
+                                                                <React.Fragment key={`${item.id}-${key}`}>
+                                                                    {key === 'subcontainerNumber' && '.'}
+                                                                    {key === 'toolNumber' && '-'}
+                                                                    <InfoInline
+                                                                        infoComponent={
+                                                                            <span>
+                                                                                {mapLocationKey(key)}
+                                                                                {key === 'type' && ': '}{' '}
+                                                                                {key === 'type' &&
+                                                                                    (value === 'R'
+                                                                                        ? 'Rollcontainer'
+                                                                                        : 'Box (EU-Palette)')}
+                                                                            </span>
+                                                                        }
+                                                                    >
+                                                                        <span>{value}</span>
+                                                                    </InfoInline>
+                                                                </React.Fragment>
+                                                            );
+                                                        })}
+                                                    </div>
+                                                );
+                                            } catch {
+                                                return item.location || '';
+                                            }
+                                        })()}
+                                    </TableCell>
+
+                                    <TableCell id="itemId" $hideOnMobile>
+                                        {item.itemId ?? '-'}
+                                    </TableCell>
+                                    <TableCell id="deviceNumber" $hideOnMobile>
+                                        {packMode ? (
+                                            <PackModeCell>
+                                                <CheckboxInput
+                                                    type="checkbox"
+                                                    checked={isSelected}
+                                                    onChange={() => toggleItem(itemId, defaultPackQty)}
+                                                    onClick={(e) => e.stopPropagation()}
+                                                />
+                                                <QuantitySpinner
+                                                    value={qtyByItemId[itemId] ?? defaultPackQty}
+                                                    min={minPackQty}
+                                                    max={maxQty}
+                                                    disabled={!isSelected}
+                                                    onChange={(v) => setQuantity(itemId, v)}
+                                                    ariaLabel="Required quantity"
+                                                />
+                                            </PackModeCell>
+                                        ) : (
+                                            (item.deviceNumber ?? '-')
+                                        )}
+                                    </TableCell>
+                                    {sortField === 'nextInspection' && (
+                                        <TableCell id="nextInspection">
+                                            {(() => {
+                                                const nextDate = calculateNextInspectionDate(
+                                                    item.lastInspection,
+                                                    item.inspectionIntervalMonths
+                                                );
+                                                if (!nextDate) return '-';
+                                                const now = new Date();
+                                                now.setHours(0, 0, 0, 0);
+                                                const isPast = nextDate.getTime() < now.getTime();
+                                                return (
+                                                    <span
+                                                        style={{
+                                                            color: isPast ? theme.colors.status.error.main : 'inherit',
+                                                            fontWeight: isPast ? 600 : 400,
+                                                        }}
+                                                    >
+                                                        {Intl.DateTimeFormat('de-DE', {
+                                                            day: '2-digit',
+                                                            month: '2-digit',
+                                                            year: 'numeric',
+                                                        }).format(nextDate)}
+                                                    </span>
+                                                );
+                                            })()}
+                                        </TableCell>
+                                    )}
+                                    {packMode && (
+                                        <PackControlsCell id="packControls">
+                                            <PackControlsLabel>
+                                                <span>Pack</span>
+                                                <span style={{ opacity: 0.75 }}>
+                                                    Tap card to {isSelected ? 'unselect' : 'select'}
+                                                </span>
+                                            </PackControlsLabel>
+                                            <PackControlsRight>
+                                                {isSelected && <SelectedBadge>Selected</SelectedBadge>}
+                                                <QuantitySpinner
+                                                    value={qtyByItemId[itemId] ?? defaultPackQty}
+                                                    min={minPackQty}
+                                                    max={maxQty}
+                                                    disabled={!isSelected}
+                                                    onChange={(v) => setQuantity(itemId, v)}
+                                                    ariaLabel="Required quantity"
+                                                />
+                                            </PackControlsRight>
+                                        </PackControlsCell>
+                                    )}
+                                </TableRow>
+                            );
+                        })}
+                    </Table>
+
+                    <PaginationContainer>
+                        <PaginationInfo>
+                            Zeige {items.length > 0 ? (currentPage - 1) * pageSize + 1 : 0} -{' '}
+                            {Math.min(currentPage * pageSize, totalItems)} von {totalItems} Gegenständen
+                        </PaginationInfo>
+                        <PaginationControls>
+                            <PaginationButton
+                                onClick={() => handlePageChange(currentPage - 1)}
+                                disabled={currentPage === 1 || isLoading}
+                                variant="outline-primary"
+                            >
+                                <IconContainer icon={ChevronLeft} />
+                            </PaginationButton>
+
+                            <PageNumbers>
+                                {currentPage > 3 && (
+                                    <>
+                                        <PageNumber
+                                            variant="outline-primary"
+                                            onClick={() => handlePageChange(1)}
+                                            $active={false}
+                                        >
+                                            1
+                                        </PageNumber>
+                                        {currentPage > 4 && <PageEllipsis>...</PageEllipsis>}
+                                    </>
+                                )}
+
+                                {Array.from({ length: totalPages }, (_, i) => i + 1)
+                                    .filter((page) => page >= currentPage - 2 && page <= currentPage + 2)
+                                    .map((page) => (
+                                        <PageNumber
+                                            key={page}
+                                            onClick={() => handlePageChange(page)}
+                                            $active={page === currentPage}
+                                            variant={`${page === currentPage ? 'primary' : 'outline-primary'}`}
+                                        >
+                                            {page}
+                                        </PageNumber>
+                                    ))}
+
+                                {currentPage < totalPages - 2 && (
+                                    <>
+                                        {currentPage < totalPages - 3 && <PageEllipsis>...</PageEllipsis>}
+                                        <PageNumber
+                                            variant="outline-primary"
+                                            onClick={() => handlePageChange(totalPages)}
+                                            $active={false}
+                                        >
+                                            {totalPages}
+                                        </PageNumber>
+                                    </>
+                                )}
+                            </PageNumbers>
+
+                            <PaginationButton
+                                onClick={() => handlePageChange(currentPage + 1)}
+                                disabled={currentPage === totalPages || isLoading}
+                                variant="outline-primary"
+                            >
+                                <IconContainer icon={ChevronRight} />
+                            </PaginationButton>
+                        </PaginationControls>
+                    </PaginationContainer>
+                </>
+            )}
+        </div>
+    );
+};
+
+const LoadingContainer = styled.div`
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 40px;
+    gap: 12px;
+    color: var(--color-font-secondary);
+`;
+
+const PaginationContainer = styled.div`
+    display: flex;
+    flex-direction: row;
+    justify-content: space-between;
+    align-items: center;
+    padding: 20px 0;
+    margin-top: 20px;
+    border-top: 1px solid var(--color-bg-accent);
+
+    @media only screen and (max-device-width: 812px) and (orientation: portrait) {
+        flex-direction: column;
+        gap: 16px;
+    }
+`;
+
+const PaginationInfo = styled.div`
+    font-size: 14px;
+`;
+
+const PaginationControls = styled.div`
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 12px;
+`;
+
+const PaginationButton = styled(Button)`
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 16px;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+
+    &:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+    }
+`;
+
+const PageNumbers = styled.div`
+    display: flex;
+    flex-direction: row;
+    gap: 6px;
+    align-items: center;
+`;
+
+const PageNumber = styled(Button)<{ $active: boolean }>`
+    min-width: 36px;
+    height: 36px;
+    padding: 0 8px;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    font-weight: ${(props) => (props.$active ? '600' : '400')};
+`;
+
+const PageEllipsis = styled.span`
+    padding: 0 4px;
+    color: var(--color-font-secondary);
+`;
+
+const TableCell = styled.div<{ $hideOnMobile?: boolean }>`
+    display: flex;
+    align-items: center;
+    flex-direction: row;
+    gap: 4px;
+
+    @media only screen and (max-device-width: 812px) and (orientation: portrait) {
+        display: ${(p) => (p.$hideOnMobile ? 'none' : 'flex')};
+    }
+`;
+
+const InfoInline = (props: { children: ReactNode | ReactNode[]; infoComponent: ReactNode | ReactNode[] }) => {
+    const { children, infoComponent } = props;
+
+    return (
+        <OverlayTrigger
+            placement="bottom"
+            overlay={
+                <Tooltip id="info-tooltip" style={{ fontSize: '14px' }}>
+                    {infoComponent}
+                </Tooltip>
+            }
+            delay={{ show: 150, hide: 300 }}
+            trigger={['hover', 'focus', 'click']}
+        >
+            <span
+                style={{
+                    position: 'relative',
+                    display: 'inline-block',
+                }}
+                onClick={(e) => e.stopPropagation()}
+            >
+                <span>{children}</span>
+                <span
+                    style={{
+                        width: '100%',
+                        height: '0px',
+                        display: 'block',
+                        position: 'absolute',
+                        bottom: 0,
+                        left: 0,
+                        content: '',
+                        borderBottom: '2px dotted rgba(var(--color-primary-rgb), .2)',
+                    }}
+                />
+            </span>
+        </OverlayTrigger>
+    );
+};
+
+const InfoIndicator = (props: { children: ReactNode | ReactNode[] }) => {
+    const { children } = props;
+
+    return (
+        <OverlayTrigger
+            placement="bottom"
+            overlay={
+                <Tooltip id="info-tooltip" style={{ fontSize: '14px' }}>
+                    {children}
+                </Tooltip>
+            }
+            delay={{ show: 150, hide: 300 }}
+        >
+            <span
+                className="info-icon"
+                style={{
+                    width: '1em',
+                    height: '1em',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                }}
+            >
+                <Info />
+            </span>
+        </OverlayTrigger>
+    );
+};
+
+const SortIndicator = (props: { active: boolean; sortDirection?: SortDirection }) => {
+    const { active, sortDirection } = props;
+
+    return (
+        <SortIndicatorWrapper $isActive={active}>
+            <IconContainer
+                icon={!active || !sortDirection ? ArrowDownAZ : sortDirection == 'asc' ? ArrowDownAZ : ArrowDownZA}
+            />
+        </SortIndicatorWrapper>
+    );
+};
+
+const CellAmount = styled.div<{ $hideOnMobile?: boolean }>`
+    --flex-gap: 6px;
+    display: flex;
+    flex-direction: row;
+    gap: var(--flex-gap);
+
+    & > span:not(:last-child)::after {
+        position: relative;
+        display: block;
+        content: '/';
+        float: right;
+        margin-left: var(--flex-gap);
+    }
+
+    @media only screen and (max-device-width: 812px) and (orientation: portrait) {
+        display: ${(p) => (p.$hideOnMobile ? 'none' : 'flex')};
+    }
+`;
+
+const Table = styled.div<{ $showNextInspection?: boolean }>`
+    display: grid;
+    grid-template-columns: repeat(${(p) => (p.$showNextInspection ? 9 : 8)}, 1fr);
+    border-radius: 8px;
+    overflow-x: auto;
+
+    @media only screen and (max-device-width: 812px) and (orientation: portrait) {
+        display: flex;
+        flex-direction: column;
+        max-width: 100%;
+        gap: 16px;
+        border-radius: 0;
+    }
+`;
+
+const TableRowBase = styled.div`
+    --border-color: var(--color-bg-accent);
+
+    display: contents;
+
+    & > * {
+        padding: 16px 20px;
+        border-bottom: 1px solid var(--border-color);
+    }
+
+    & > *:first-child {
+        border-left: 1px solid var(--border-color);
+    }
+
+    & > *:last-child {
+        border-right: 1px solid var(--border-color);
+    }
+
+    max-width: 100%;
+
+    @media only screen and (max-device-width: 812px) and (orientation: portrait) {
+        & > * {
+            border: none !important;
+        }
+    }
+`;
+
+const TableHeader = styled(TableRowBase)`
+    & > * {
+        background-color: var(--border-color);
+        color: var(--color-font-secondary);
+        font-weight: 600;
+        border-bottom: 2px solid var(--border-color);
+    }
+
+    @media only screen and (max-device-width: 812px) and (orientation: portrait) {
+        display: none;
+    }
+`;
+
+const TableRow = styled(TableRowBase)<{
+    $mobileBgColor: string;
+    $mobileColor: string;
+    $mobileShadowColor: string;
+    $showNextInspection?: boolean;
+}>`
+    & > * {
+        background-color: white;
+    }
+
+    &:hover > * {
+        background-color: var(--color-bg-hover, #f8f9fa);
+        cursor: pointer;
+    }
+
+    & span.info-icon {
+        opacity: 0;
+    }
+
+    &:hover span.info-icon {
+        opacity: 1;
+    }
+
+    @media only screen and (max-device-width: 812px) and (orientation: portrait) {
+        display: grid !important;
+        grid-template-columns: 1fr 1fr;
+        grid-template-areas:
+            'inventoryNumber damageLevel'
+            ${(p) => (p.$showNextInspection ? "'name nextInspection'" : "'name name'")}
+            'location isSet'
+            'packControls packControls';
+        gap: 12px;
+        padding: 16px;
+
+        border: 1px solid ${(p) => p.$mobileBgColor} !important;
+        border-left: 4px solid ${(p) => p.$mobileBgColor} !important;
+        border-radius: 8px;
+
+        box-shadow: 0 2px 6px rgba(${(p) => p.$mobileShadowColor}, 0.05);
+
+        &.selected {
+            border: 2px solid var(--color-primary) !important;
+            border-left: 4px solid var(--color-primary) !important;
+            background-color: rgba(var(--color-primary-rgb), 0.06);
+        }
+
+        & > #location svg {
+            display: none;
+        }
+
+        & > * {
+            background-color: transparent !important;
+            padding: 0 !important; /* Remove default padding */
+        }
+
+        & > #inventoryNumber {
+            grid-area: inventoryNumber;
+        }
+        & > #name {
+            grid-area: name;
+            font-weight: 600;
+            font-size: 16px;
+        }
+        & > #damageLevel {
+            grid-area: damageLevel;
+            justify-self: end;
+        }
+
+        & > #location {
+            grid-area: location;
+
+            & svg {
+                display: block;
+            }
+        }
+
+        & > #location,
+        & > #inventoryNumber,
+        & > #isSet {
+            font-size: 14px;
+            color: var(--color-font-secondary);
+        }
+
+        & > #isSet {
+            justify-self: end;
+            grid-area: isSet;
+        }
+
+        & > #nextInspection {
+            grid-area: nextInspection;
+            justify-self: end;
+            font-size: 14px;
+        }
+
+        & > #packControls {
+            grid-area: packControls;
+        }
+    }
+`;
+
+const HeaderCell = styled.div`
+    cursor: pointer;
+`;
+
+const HeaderContent = styled.div`
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 6px;
+`;
+
+const SortIndicatorWrapper = styled.span<{ $isActive: boolean }>`
+    display: flex;
+    align-items: center;
+    transition: opacity 0.1s;
+
+    opacity: ${(props) => (props.$isActive ? '1' : '0')};
+
+    ${HeaderCell}:hover & {
+        opacity: ${(props) => (props.$isActive ? '1' : '0.5')} !important;
+    }
+`;
+
+const PackModeCell = styled.div`
+    display: flex;
+    align-items: center;
+    gap: 8px;
+`;
+
+const PackControlsCell = styled(TableCell)`
+    /* Only show mobile pack controls on phones */
+    display: none;
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding-top: 8px !important;
+    border-top: 1px dashed var(--color-bg-accent);
+
+    @media only screen and (max-device-width: 812px) and (orientation: portrait) {
+        display: flex;
+    }
+`;
+
+const PackControlsLabel = styled.div`
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    font-size: 13px;
+    color: var(--color-font-secondary);
+`;
+
+const PackControlsRight = styled.div`
+    display: flex;
+    align-items: center;
+    gap: 10px;
+`;
+
+const SelectedBadge = styled.span`
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 4px 8px;
+    border-radius: 999px;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--color-primary);
+    background-color: rgba(var(--color-primary-rgb), 0.12);
+`;
+
+const CheckboxInput = styled.input`
+    cursor: pointer;
+    width: 18px;
+    height: 18px;
+
+    &:disabled {
+        cursor: not-allowed;
+        opacity: 0.5;
+    }
+`;
+
+export default ItemOverview;

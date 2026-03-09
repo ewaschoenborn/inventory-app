@@ -1,0 +1,65 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "Run Frontend",
+            "type": "shell",
+            "command": "npm run dev -- --port 50001",
+            "isBackground": true,
+            "detail": "Starts the Vite dev server on http://localhost:50001",
+            "problemMatcher": {
+                "owner": "vite",
+                "pattern": {
+                    "regexp": ".*"
+                },
+                "background": {
+                    "activeOnStart": true,
+                    "beginsPattern": "VITE v.* ready in",
+                    "endsPattern": "build ended"
+                }
+            },
+            "group": {
+                "kind": "test",
+                "isDefault": true
+            }
+        },
+
+        {
+            "label": "Build Production",
+            "type": "npm",
+            "script": "build",
+            "detail": "Bundles the app for production into the 'dist' folder.",
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            },
+            "problemMatcher": [
+                "$tsc", // Catches TypeScript errors
+                "$eslint-compact" // Catches ESLint errors
+            ]
+        },
+        {
+            "label": "Preview Production Build",
+            "type": "npm",
+            "script": "preview",
+            "detail": "Serves the production 'dist' folder locally to test the build.",
+            "isBackground": true,
+            "problemMatcher": []
+        },
+
+        {
+            "label": "Run Linter",
+            "type": "npm",
+            "script": "lint",
+            "detail": "Finds and reports code quality issues.",
+            "problemMatcher": ["$eslint-compact"]
+        },
+        {
+            "label": "Install Frontend Dependencies",
+            "type": "npm",
+            "script": "install",
+            "detail": "Runs 'npm install' to get all packages.",
+            "problemMatcher": []
+        }
+    ]
+}

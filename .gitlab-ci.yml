@@ -1,0 +1,31 @@
+image: node:18
+
+stages:
+    - build
+    - deploy
+
+build:
+    stage: build
+    cache:
+        paths:
+            - node_modules/
+    script:
+        - npm ci
+        - npm run build
+        - cp -r public/* dist/
+    artifacts:
+        paths:
+            - dist
+
+pages:
+    stage: deploy
+    dependencies:
+        - build
+    script:
+        - rm -rf public
+        - mv dist public
+    artifacts:
+        paths:
+            - public
+    only:
+        - main

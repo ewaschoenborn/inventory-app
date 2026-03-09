@@ -136,8 +136,8 @@ const ItemOverview = () => {
                 case 'nextInspection': {
                     const aDate = calculateNextInspectionDate(a.lastInspection, a.inspectionIntervalMonths);
                     const bDate = calculateNextInspectionDate(b.lastInspection, b.inspectionIntervalMonths);
-                    aValue = aDate ? aDate.getTime() : (sortDirection === 'asc' ? Infinity : -Infinity);
-                    bValue = bDate ? bDate.getTime() : (sortDirection === 'asc' ? Infinity : -Infinity);
+                    aValue = aDate ? aDate.getTime() : sortDirection === 'asc' ? Infinity : -Infinity;
+                    bValue = bDate ? bDate.getTime() : sortDirection === 'asc' ? Infinity : -Infinity;
                     break;
                 }
                 default:
@@ -230,7 +230,7 @@ const ItemOverview = () => {
             // Reset pack mode
             packModeState.togglePackMode();
 
-             // Navigate to the created packing plan (no confirmation popup)
+            // Navigate to the created packing plan (no confirmation popup)
             navigate(`/packing-plans/${packingPlan.id}`);
         } catch (error) {
             console.error('Error saving packing plan:', error);
@@ -456,12 +456,20 @@ const ItemOverview = () => {
                                     {sortField === 'nextInspection' && (
                                         <TableCell id="nextInspection">
                                             {(() => {
-                                                const nextDate = calculateNextInspectionDate(item.lastInspection, item.inspectionIntervalMonths);
+                                                const nextDate = calculateNextInspectionDate(
+                                                    item.lastInspection,
+                                                    item.inspectionIntervalMonths
+                                                );
                                                 if (!nextDate) return '-';
-                                                
+
                                                 const isPast = isDatePastOrToday(nextDate);
                                                 return (
-                                                    <span style={{ color: isPast ? theme.colors.status.error.main : 'inherit', fontWeight: isPast ? 600 : 400 }}>
+                                                    <span
+                                                        style={{
+                                                            color: isPast ? theme.colors.status.error.main : 'inherit',
+                                                            fontWeight: isPast ? 600 : 400,
+                                                        }}
+                                                    >
                                                         {formatDate(nextDate)}
                                                     </span>
                                                 );
@@ -803,7 +811,12 @@ const TableHeader = styled(TableRowBase)`
     }
 `;
 
-const TableRow = styled(TableRowBase)<{ $mobileBgColor: string; $mobileColor: string; $mobileShadowColor: string; $showNextInspection?: boolean }>`
+const TableRow = styled(TableRowBase)<{
+    $mobileBgColor: string;
+    $mobileColor: string;
+    $mobileShadowColor: string;
+    $showNextInspection?: boolean;
+}>`
     & > * {
         background-color: white;
     }

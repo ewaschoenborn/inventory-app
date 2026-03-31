@@ -1,0 +1,34 @@
+image: node:22
+
+stages:
+    - build
+    - deploy
+
+variables:
+    NODE_OPTIONS: "--max-old-space-size=4096"
+
+build:
+    stage: build
+    cache:
+        paths:
+            - node_modules/
+    script:
+        - npm ci
+        - npm run build
+        - cp -r public/* dist/
+    artifacts:
+        paths:
+            - dist
+
+pages:
+    stage: deploy
+    dependencies:
+        - build
+    script:
+        - rm -rf public
+        - mv dist public
+    artifacts:
+        paths:
+            - public
+    only:
+        - main
